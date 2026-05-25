@@ -1,0 +1,53 @@
+  services:
+
+    postgres:
+      image: postgres:16-alpine
+
+      environment:
+        POSTGRES_DB: ${POSTGRES_DB}
+        POSTGRES_USER: ${POSTGRES_USER}
+        POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+      ports:
+        - "5432:5432"
+
+      volumes:
+        - pgdata:/var/lib/postgresql/data
+        - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+    keycloak:
+      image: quay.io/keycloak/keycloak:26.2
+      command: start-dev
+      environment:
+        KC_HOSTNAME: ${KC_HOSTNAME}
+        KC_HTTP_PORT: ${KC_HTTP_PORT}
+        KC_DB: ${KC_DB}
+        KC_DB_URL: ${KC_DB_URL}
+        KC_DB_USERNAME: ${KC_DB_USERNAME}
+        KC_DB_PASSWORD: ${KC_DB_PASSWORD}
+        KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN}
+        KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      ports:
+        - "8081:8080"
+      depends_on:
+        - postgres
+
+    magicthegatheringaccounts:
+      build:
+        context: ../magicthegatheringaccounts
+
+      ports:
+        - "8082:8080"
+
+      environment:
+        SPRING_R2DBC_URL: ${SPRING_R2DBC_URL}
+        SPRING_R2DBC_USERNAME: ${SPRING_R2DBC_USERNAME}
+        SPRING_R2DBC_PASSWORD: ${SPRING_R2DBC_PASSWORD}
+      depends_on:
+        - postgres
+        - keycloak
+
+  volumes:
+    pgdata:
+
+

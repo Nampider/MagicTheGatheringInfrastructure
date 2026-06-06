@@ -1,83 +1,76 @@
-  services:
+services:
 
-    postgres:
-      image: postgres:16-alpine
-      environment:
-        POSTGRES_DB: ${POSTGRES_DB}
-        POSTGRES_USER: ${POSTGRES_USER}
-        POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
-      ports:
-        - "5433:5432"
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.2
+    command: start-dev --import-realm
+    environment:
+      KC_HOSTNAME: ${KC_HOSTNAME}
+      KC_HTTP_PORT: ${KC_HTTP_PORT}
+      KC_DB: ${KC_DB}
+      KC_DB_URL: ${KC_DB_URL}
+      KC_DB_USERNAME: ${KC_DB_USERNAME}
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD}
+    volumes:
+      - ./keycloak-export:/opt/keycloak/data/import
+    ports:
+      - "8081:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
-      volumes:
-        - pgdata:/var/lib/postgresql/data
-        - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+  magicthegatheringaccounts:
+    image: kriznn/magicthegatheringaccounts:latest
+    ports:
+      - "8082:8080"
+    environment:
+      SPRING_R2DBC_URL: ${SPRING_R2DBC_URL}
+      SPRING_R2DBC_USERNAME: ${SPRING_R2DBC_USERNAME}
+      SPRING_R2DBC_PASSWORD: ${SPRING_R2DBC_PASSWORD}
+      SPRING_FLYWAY_URL: jdbc:postgresql://postgres:5432/account_db
+      SPRING_FLYWAY_USER: ${SPRING_R2DBC_USERNAME}
+      SPRING_FLYWAY_PASSWORD: ${SPRING_R2DBC_PASSWORD}
+      KEYCLOAK_ISSUER_URL: http://keycloak:8080/realms/cards
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
 
-      healthcheck:
-        test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
-        interval: 5s
-        timeout: 5s
-        retries: 10
+  magicthegatheringwebsite:
+    image: kriznn/magicthegatheringwebsite:latest
+    ports:
+      - "8083:8080"
+    environment:
+      SPRING_R2DBC_URL: r2dbc:postgresql://postgres:5432/marketplace_db
+      SPRING_R2DBC_USERNAME: ${SPRING_R2DBC_USERNAME}
+      SPRING_R2DBC_PASSWORD: ${SPRING_R2DBC_PASSWORD}
+      SPRING_FLYWAY_URL: jdbc:postgresql://postgres:5432/marketplace_db
+      SPRING_FLYWAY_USER: ${SPRING_R2DBC_USERNAME}
+      SPRING_FLYWAY_PASSWORD: ${SPRING_R2DBC_PASSWORD}
+      SPRING_FLYWAY_BASELINE_ON_MIGRATE: "true"
+      SPRING_FLYWAY_LOCATIONS: classpath:db/migration
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
 
-    keycloak:
-      image: quay.io/keycloak/keycloak:26.2
-      command: start-dev
-
-      environment:
-        KC_HOSTNAME: ${KC_HOSTNAME}
-        KC_HTTP_PORT: ${KC_HTTP_PORT}
-
-        KC_DB: ${KC_DB}
-        KC_DB_URL: ${KC_DB_URL}
-        KC_DB_USERNAME: ${KC_DB_USERNAME}
-        KC_DB_PASSWORD: ${KC_DB_PASSWORD}
-
-        KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN}
-        KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
-
-      ports:
-        - "8081:8080"
-
-      depends_on:
-        postgres:
-          condition: service_healthy
-
-    magicthegatheringaccounts:
-      image: kriznn/magicthegatheringaccounts:latest
-      ports:
-        - "8082:8080"
-      environment:
-        SPRING_R2DBC_URL: ${SPRING_R2DBC_URL}
-        SPRING_R2DBC_USERNAME: ${SPRING_R2DBC_USERNAME}
-        SPRING_R2DBC_PASSWORD: ${SPRING_R2DBC_PASSWORD}
-        SPRING_FLYWAY_URL: jdbc:postgresql://postgres:5432/account_db
-        SPRING_FLYWAY_USER: ${SPRING_R2DBC_USERNAME}
-        SPRING_FLYWAY_PASSWORD: ${SPRING_R2DBC_PASSWORD}
-      depends_on:
-        postgres:
-          condition: service_healthy
-        keycloak:
-          condition: service_started
-
-    magicthegatheringwebsite:
-      image: kriznn/magicthegatheringwebsite:latest
-      ports:
-        - "8083:8080"
-      environment:
-        SPRING_R2DBC_URL: r2dbc:postgresql://postgres:5432/marketplace_db
-        SPRING_R2DBC_USERNAME: ${SPRING_R2DBC_USERNAME}
-        SPRING_R2DBC_PASSWORD: ${SPRING_R2DBC_PASSWORD}
-        SPRING_FLYWAY_URL: jdbc:postgresql://postgres:5432/marketplace_db
-        SPRING_FLYWAY_USER: ${SPRING_R2DBC_USERNAME}
-        SPRING_FLYWAY_PASSWORD: ${SPRING_R2DBC_PASSWORD}
-        SPRING_FLYWAY_BASELINE_ON_MIGRATE: "true"
-        SPRING_FLYWAY_LOCATIONS: classpath:db/migration
-      depends_on:
-        postgres:
-          condition: service_healthy
-        keycloak:
-          condition: service_started
-
-  volumes:
-    pgdata:
+volumes:
+  pgdata:

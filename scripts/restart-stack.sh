@@ -5,10 +5,12 @@ INFRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROOT_DIR="$(cd "$INFRA_DIR/.." && pwd)"
 WEBSITE_DIR="${WEBSITE_DIR:-$ROOT_DIR/magicthegatheringwebsite}"
 ACCOUNTS_DIR="${ACCOUNTS_DIR:-$ROOT_DIR/magicthegatheringaccounts}"
+COMMERCE_DIR="${COMMERCE_DIR:-$ROOT_DIR/MagicTheGatheringCommerce}"
 STATE_DIR="$INFRA_DIR/.deploy-state"
 
 WEBSITE_IMAGE="${WEBSITE_IMAGE:-kriznn/magicthegatheringwebsite:latest}"
 ACCOUNTS_IMAGE="${ACCOUNTS_IMAGE:-kriznn/magicthegatheringaccounts:latest}"
+COMMERCE_IMAGE="${COMMERCE_IMAGE:-kriznn/magicthegatheringcommerce:latest}"
 
 PUSH_IMAGES=false
 NO_CACHE=false
@@ -20,7 +22,7 @@ usage() {
     cat <<EOF
 Usage: ./scripts/restart-stack.sh [options]
 
-Checks the accounts and website repos for changes, packages changed services,
+Checks the accounts, website, and commerce repos for changes, packages changed services,
 builds their Docker images, optionally pushes them, and restarts Docker Compose.
 
 Options:
@@ -34,8 +36,10 @@ Options:
 Environment:
   WEBSITE_DIR         Default: ../magicthegatheringwebsite
   ACCOUNTS_DIR        Default: ../magicthegatheringaccounts
+  COMMERCE_DIR        Default: ../MagicTheGatheringCommerce
   WEBSITE_IMAGE       Default: kriznn/magicthegatheringwebsite:latest
   ACCOUNTS_IMAGE      Default: kriznn/magicthegatheringaccounts:latest
+  COMMERCE_IMAGE      Default: kriznn/magicthegatheringcommerce:latest
 EOF
 }
 
@@ -67,6 +71,42 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
     shift
+done
+
+if [[ -f "$INFRA_DIR/.env" ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    source "$INFRA_DIR/.env"
+    set +a
+fi
+
+required_env_vars=(
+    POSTGRES_DB
+    POSTGRES_USER
+    POSTGRES_PASSWORD
+    KC_DB_USERNAME
+    KC_DB_PASSWORD
+    SPRING_R2DBC_USERNAME
+    SPRING_R2DBC_PASSWORD
+    ACCOUNTS_FLYWAY_URL
+    WEBSITE_R2DBC_URL
+    WEBSITE_FLYWAY_URL
+    COMMERCE_R2DBC_URL
+    COMMERCE_FLYWAY_URL
+    KEYCLOAK_ADMIN
+    KEYCLOAK_ADMIN_PASSWORD
+    KEYCLOAK_ADMIN_USERNAME
+    KEYCLOAK_INTERNAL_URL
+    KEYCLOAK_ISSUER_URL
+    KEYCLOAK_JWK_SET_URI
+)
+
+for env_var in "${required_env_vars[@]}"; do
+    if [[ -z "${!env_var:-}" ]]; then
+        echo "Missing required environment variable: $env_var"
+        echo "Create $INFRA_DIR/.env from $INFRA_DIR/.env.example and fill in local values."
+        exit 1
+    fi
 done
 
 require_repo() {
@@ -145,12 +185,54 @@ build_service_if_changed() {
     fi
 }
 
+wait_for_postgres() {
+    echo "Waiting for Postgres to accept connections..."
+    local attempts=0
+
+    until (cd "$INFRA_DIR" && docker compose exec -T postgres pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}") >/dev/null 2>&1; do
+        attempts=$((attempts + 1))
+        if [[ "$attempts" -gt 60 ]]; then
+            echo "Postgres did not become ready in time."
+            exit 1
+        fi
+        sleep 2
+    done
+}
+
+ensure_database() {
+    local database_name="$1"
+    local database_exists
+
+    if [[ ! "$database_name" =~ ^[A-Za-z0-9_]+$ ]]; then
+        echo "Refusing unsafe database name: $database_name"
+        exit 1
+    fi
+
+    echo "Ensuring database exists: $database_name"
+    database_exists="$(cd "$INFRA_DIR" && docker compose exec -T postgres psql \
+        -U "${POSTGRES_USER}" \
+        -d "${POSTGRES_DB}" \
+        -tAc "SELECT 1 FROM pg_database WHERE datname = '$database_name'")"
+
+    if [[ "$database_exists" == "1" ]]; then
+        echo "Database already exists: $database_name"
+        return
+    fi
+
+    (cd "$INFRA_DIR" && docker compose exec -T postgres psql \
+        -U "${POSTGRES_USER}" \
+        -d "${POSTGRES_DB}" \
+        -c "CREATE DATABASE \"$database_name\"")
+}
+
 require_repo "$WEBSITE_DIR" "website"
 require_repo "$ACCOUNTS_DIR" "accounts"
+require_repo "$COMMERCE_DIR" "commerce"
 mkdir -p "$STATE_DIR"
 
 build_service_if_changed "website" "$WEBSITE_DIR" "$WEBSITE_IMAGE"
 build_service_if_changed "accounts" "$ACCOUNTS_DIR" "$ACCOUNTS_IMAGE"
+build_service_if_changed "commerce" "$COMMERCE_DIR" "$COMMERCE_IMAGE"
 
 echo "Restarting Docker Compose stack from $INFRA_DIR..."
 
@@ -159,6 +241,13 @@ if [[ "$RESET_VOLUMES" == true ]]; then
 else
     (cd "$INFRA_DIR" && docker compose down)
 fi
+
+(cd "$INFRA_DIR" && docker compose up -d postgres)
+wait_for_postgres
+ensure_database "account_db"
+ensure_database "marketplace_db"
+ensure_database "keycloak_db"
+ensure_database "commerce_db"
 
 (cd "$INFRA_DIR" && docker compose up -d)
 
@@ -170,3 +259,4 @@ fi
 echo "Done."
 echo "Website API: http://localhost:8083"
 echo "Accounts API: http://localhost:8082"
+echo "Commerce API: http://localhost:8084"

@@ -21,8 +21,12 @@ services:
     image: quay.io/keycloak/keycloak:26.2
     command: start-dev --import-realm
     environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
       KC_HOSTNAME: ${KC_HOSTNAME}
       KC_HTTP_PORT: ${KC_HTTP_PORT}
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
       KC_DB: ${KC_DB}
       KC_DB_URL: ${KC_DB_URL}
       KC_DB_USERNAME: ${KC_DB_USERNAME}
@@ -37,16 +41,25 @@ services:
 
   magicthegatheringaccounts:
     image: kriznn/magicthegatheringaccounts:latest
+    build: ../magicthegatheringaccounts
     ports:
       - "8082:8080"
     environment:
       SPRING_R2DBC_URL: ${SPRING_R2DBC_URL}
       SPRING_R2DBC_USERNAME: ${SPRING_R2DBC_USERNAME}
       SPRING_R2DBC_PASSWORD: ${SPRING_R2DBC_PASSWORD}
-      SPRING_FLYWAY_URL: jdbc:postgresql://postgres:5432/account_db
+      SPRING_FLYWAY_URL: ${ACCOUNTS_FLYWAY_URL}
       SPRING_FLYWAY_USER: ${SPRING_R2DBC_USERNAME}
       SPRING_FLYWAY_PASSWORD: ${SPRING_R2DBC_PASSWORD}
-      KEYCLOAK_ISSUER_URL: http://keycloak:8080/realms/cards
+      SPRING_FLYWAY_ENABLED: "true"
+      SPRING_FLYWAY_LOCATIONS: classpath:db/migration
+      KEYCLOAK_ISSUER_URL: ${KEYCLOAK_ISSUER_URL}
+      KEYCLOAK_INTERNAL_URL: ${KEYCLOAK_INTERNAL_URL}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM}
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID}
+      KEYCLOAK_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      MAGIC_WEBSITE_URL: http://magicthegatheringwebsite:8080
     depends_on:
       postgres:
         condition: service_healthy
@@ -55,21 +68,56 @@ services:
 
   magicthegatheringwebsite:
     image: kriznn/magicthegatheringwebsite:latest
+    build: ../magicthegatheringwebsite
     ports:
       - "8083:8080"
     environment:
-      SPRING_R2DBC_URL: r2dbc:postgresql://postgres:5432/marketplace_db
+      SPRING_R2DBC_URL: ${WEBSITE_R2DBC_URL}
       SPRING_R2DBC_USERNAME: ${SPRING_R2DBC_USERNAME}
       SPRING_R2DBC_PASSWORD: ${SPRING_R2DBC_PASSWORD}
-      SPRING_FLYWAY_URL: jdbc:postgresql://postgres:5432/marketplace_db
+      SPRING_FLYWAY_URL: ${WEBSITE_FLYWAY_URL}
       SPRING_FLYWAY_USER: ${SPRING_R2DBC_USERNAME}
       SPRING_FLYWAY_PASSWORD: ${SPRING_R2DBC_PASSWORD}
       SPRING_FLYWAY_BASELINE_ON_MIGRATE: "true"
       SPRING_FLYWAY_LOCATIONS: classpath:db/migration
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: ${KEYCLOAK_ISSUER_URL}
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: ${KEYCLOAK_JWK_SET_URI}
     depends_on:
       postgres:
         condition: service_healthy
       keycloak:
+        condition: service_started
+
+  magicthegatheringcommerce:
+    image: kriznn/magicthegatheringcommerce:latest
+    build: ../MagicTheGatheringCommerce
+    ports:
+      - "8084:8080"
+    environment:
+      SPRING_R2DBC_URL: ${COMMERCE_R2DBC_URL}
+      SPRING_R2DBC_USERNAME: ${SPRING_R2DBC_USERNAME}
+      SPRING_R2DBC_PASSWORD: ${SPRING_R2DBC_PASSWORD}
+      SPRING_FLYWAY_URL: ${COMMERCE_FLYWAY_URL}
+      SPRING_FLYWAY_USER: ${SPRING_R2DBC_USERNAME}
+      SPRING_FLYWAY_PASSWORD: ${SPRING_R2DBC_PASSWORD}
+      SPRING_FLYWAY_ENABLED: "true"
+      SPRING_FLYWAY_LOCATIONS: classpath:db/migration
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: ${KEYCLOAK_ISSUER_URL}
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: ${KEYCLOAK_JWK_SET_URI}
+      COMMERCE_PAYMENT_PROVIDER: ${COMMERCE_PAYMENT_PROVIDER}
+      COMMERCE_CURRENCY: ${COMMERCE_CURRENCY}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      ACCOUNTS_SERVICE_URL: http://magicthegatheringaccounts:8080
+      MAGIC_WEBSITE_URL: http://magicthegatheringwebsite:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+      magicthegatheringaccounts:
+        condition: service_started
+      magicthegatheringwebsite:
         condition: service_started
 
 volumes:

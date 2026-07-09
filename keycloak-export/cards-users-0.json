@@ -1,4 +1,25 @@
 {
   "realm": "cards",
-  "users": []
+  "users": [
+    {
+      "id": "e8afef7f-1b01-4209-8ded-53e8f0a00b0b",
+      "username": "",
+      "email": "chris@example.local",
+      "firstName": "Chris",
+      "lastName": "Nam",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "",
+          "temporary": false
+        }
+      ],
+      "requiredActions": [],
+      "realmRoles": [
+        "default-roles-cards"
+      ]
+    }
+  ]
 }

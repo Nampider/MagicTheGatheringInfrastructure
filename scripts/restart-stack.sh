@@ -3,8 +3,8 @@ set -euo pipefail
 
 INFRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROOT_DIR="$(cd "$INFRA_DIR/.." && pwd)"
-WEBSITE_DIR="${WEBSITE_DIR:-$ROOT_DIR/magicthegatheringwebsite}"
-ACCOUNTS_DIR="${ACCOUNTS_DIR:-$ROOT_DIR/magicthegatheringaccounts}"
+WEBSITE_DIR="${WEBSITE_DIR:-$ROOT_DIR/MagicTheGatheringWebsite}"
+ACCOUNTS_DIR="${ACCOUNTS_DIR:-$ROOT_DIR/MagicTheGatheringAccounts}"
 COMMERCE_DIR="${COMMERCE_DIR:-$ROOT_DIR/MagicTheGatheringCommerce}"
 STATE_DIR="$INFRA_DIR/.deploy-state"
 
@@ -34,8 +34,8 @@ Options:
   -h, --help          Show this help
 
 Environment:
-  WEBSITE_DIR         Default: ../magicthegatheringwebsite
-  ACCOUNTS_DIR        Default: ../magicthegatheringaccounts
+  WEBSITE_DIR         Default: ../MagicTheGatheringWebsite
+  ACCOUNTS_DIR        Default: ../MagicTheGatheringAccounts
   COMMERCE_DIR        Default: ../MagicTheGatheringCommerce
   WEBSITE_IMAGE       Default: kriznn/magicthegatheringwebsite:latest
   ACCOUNTS_IMAGE      Default: kriznn/magicthegatheringaccounts:latest
@@ -129,6 +129,26 @@ require_repo() {
     fi
 }
 
+checksum_file() {
+    local file="$1"
+
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$file"
+        return
+    fi
+
+    sha256sum "$file"
+}
+
+checksum_stdin() {
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256
+        return
+    fi
+
+    sha256sum
+}
+
 repo_hash() {
     local repo_dir="$1"
 
@@ -142,10 +162,32 @@ repo_hash() {
             printf '%s\n' pom.xml Dockerfile
         } | while IFS= read -r file; do
             if [[ -f "$file" ]]; then
-                shasum -a 256 "$file"
+                checksum_file "$file"
             fi
         done
-    ) | shasum -a 256 | awk '{print $1}'
+    ) | checksum_stdin | awk '{print $1}'
+}
+
+package_repo() {
+    local repo_dir="$1"
+
+    if [[ -x "$repo_dir/mvnw" && -f "$repo_dir/.mvn/wrapper/maven-wrapper.properties" ]]; then
+        (cd "$repo_dir" && ./mvnw -DskipTests clean package)
+        return
+    fi
+
+    if [[ -f "$repo_dir/mvnw.cmd" && -f "$repo_dir/.mvn/wrapper/maven-wrapper.properties" ]]; then
+        (cd "$repo_dir" && ./mvnw.cmd -DskipTests clean package)
+        return
+    fi
+
+    if ! command -v mvn >/dev/null 2>&1; then
+        echo "No complete Maven wrapper found in $repo_dir, and global mvn is not on PATH."
+        echo "Expected wrapper metadata at: $repo_dir/.mvn/wrapper/maven-wrapper.properties"
+        exit 1
+    fi
+
+    (cd "$repo_dir" && mvn -DskipTests clean package)
 }
 
 build_service_if_changed() {
@@ -166,7 +208,7 @@ build_service_if_changed() {
     if [[ "$FORCE_BUILD" == true || "$new_hash" != "$old_hash" ]]; then
         echo "$service_name changes detected. Packaging and building $image_name..."
 
-        (cd "$repo_dir" && mvn -DskipTests package)
+        package_repo "$repo_dir"
 
         local docker_build_args=(-t "$image_name")
         if [[ "$NO_CACHE" == true ]]; then
@@ -183,6 +225,37 @@ build_service_if_changed() {
     else
         echo "No $service_name changes detected. Skipping Maven and Docker build."
     fi
+}
+
+seed_database() {
+    local seed_script="$WEBSITE_DIR/MagicDataRetriever/databaseIntake.py"
+    local seed_dir
+    local seed_python
+
+    if [[ ! -f "$seed_script" ]]; then
+        echo "Seed requested, but no seed script was found at: $seed_script"
+        echo "Skipping seed step."
+        return
+    fi
+
+    seed_dir="$(dirname "$seed_script")"
+    if [[ -x "$seed_dir/.venv/Scripts/python.exe" ]]; then
+        seed_python="$seed_dir/.venv/Scripts/python.exe"
+    elif [[ -x "$seed_dir/.venv/bin/python" ]]; then
+        seed_python="$seed_dir/.venv/bin/python"
+    elif command -v python3 >/dev/null 2>&1; then
+        seed_python="$(command -v python3)"
+    elif command -v python >/dev/null 2>&1; then
+        seed_python="$(command -v python)"
+    else
+        echo "Seed requested, but no Python interpreter was found."
+        echo "Create a venv in $seed_dir with: python -m venv .venv"
+        exit 1
+    fi
+
+    echo "Seeding website card and store inventory data..."
+    echo "Using Python: $seed_python"
+    (cd "$seed_dir" && "$seed_python" databaseIntake.py)
 }
 
 wait_for_postgres() {
@@ -252,8 +325,7 @@ ensure_database "commerce_db"
 (cd "$INFRA_DIR" && docker compose up -d)
 
 if [[ "$SEED_DATABASE" == true ]]; then
-    echo "Seeding website card and store inventory data..."
-    (cd "$WEBSITE_DIR/MagicDataRetriever" && python3 databaseIntake.py)
+    seed_database
 fi
 
 echo "Done."

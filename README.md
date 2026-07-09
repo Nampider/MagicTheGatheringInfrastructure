@@ -9,12 +9,13 @@ From this infrastructure repo, run:
 ./scripts/restart-stack.sh --seed
 ```
 
-The script checks both sibling app repos:
+The script checks the sibling app repos:
 
-- `../magicthegatheringwebsite`
-- `../magicthegatheringaccounts`
+- `../MagicTheGatheringWebsite`
+- `../MagicTheGatheringAccounts`
+- `../MagicTheGatheringCommerce`
 
-When either repo changed, it runs `mvn -DskipTests package`, rebuilds that service's Docker image, optionally pushes the changed image, and then restarts Docker Compose.
+When any repo changed, it packages the service with its Maven wrapper when present, rebuilds that service's Docker image, optionally pushes the changed image, and then restarts Docker Compose.
 
 Common commands:
 

@@ -109,6 +109,38 @@ for env_var in "${required_env_vars[@]}"; do
     fi
 done
 
+require_jdk() {
+    local required_major=21
+    local javac_version
+    local javac_major
+
+    if ! command -v java >/dev/null 2>&1; then
+        echo "Java is required to build the services, but java is not on PATH."
+        echo "Install JDK $required_major and make sure JAVA_HOME and PATH point to it."
+        exit 1
+    fi
+
+    if ! command -v javac >/dev/null 2>&1; then
+        echo "A JDK is required to build the services, but javac is not on PATH."
+        echo "Your machine may have a JRE installed instead of a JDK."
+        echo "Install JDK $required_major and make sure JAVA_HOME points to the JDK, not a JRE."
+        exit 1
+    fi
+
+    javac_version="$(javac -version 2>&1 | awk '{print $2}')"
+    javac_major="${javac_version%%.*}"
+    if [[ "$javac_major" == "1" ]]; then
+        javac_major="$(printf '%s' "$javac_version" | cut -d. -f2)"
+    fi
+
+    if [[ ! "$javac_major" =~ ^[0-9]+$ || "$javac_major" -lt "$required_major" ]]; then
+        echo "JDK $required_major or newer is required to build all services."
+        echo "Detected javac version: $javac_version"
+        echo "Install JDK $required_major and make sure JAVA_HOME and PATH point to it."
+        exit 1
+    fi
+}
+
 require_repo() {
     local repo_dir="$1"
     local repo_name="$2"
@@ -301,6 +333,7 @@ ensure_database() {
 require_repo "$WEBSITE_DIR" "website"
 require_repo "$ACCOUNTS_DIR" "accounts"
 require_repo "$COMMERCE_DIR" "commerce"
+require_jdk
 mkdir -p "$STATE_DIR"
 
 build_service_if_changed "website" "$WEBSITE_DIR" "$WEBSITE_IMAGE"
